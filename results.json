@@ -1,0 +1,19 @@
+[
+  {
+    "K": 3,
+    "Lambda": 1.5,
+    "Mu": 1.0,
+    "Sigmas": [
+      0.5,
+      0.4,
+      0.3
+    ],
+    "MAX_Q": 10,
+    "States": 1331,
+    "Transitions": 5830,
+    "Packet served": 0.72028,
+    "Discarded": 0.779616,
+    "Decayed n1->n2": 0.779822,
+    "Decayed n2->n3": 0.780307
+  }
+]
