@@ -13,7 +13,16 @@ def make_transfer_event(name, ni, ni1, sig):
             return tg.DISABLED
         return state.set(**{ni: state[ni] - 1, ni1: state[ni1] + 1})
     ev.__name__ = name
-    return tg.event(dist=tg.EXP(lambda s, _ni=ni, _sig=sig: s[_ni] * _sig))(ev)
+    return tg.event(dist=tg.EXP(lambda s, _sig=sig: _sig))(ev)
+
+
+def make_service_event(name, ni, mu):
+    def ev(self, state):
+        if state[ni] <= 0:
+            return tg.DISABLED
+        return state.set(**{ni: state[ni] - 1})
+    ev.__name__ = name
+    return tg.event(dist=tg.EXP(lambda s, _mu=mu: _mu))(ev)
 
 
 def make_reward_func(name, ev_name):
@@ -40,25 +49,21 @@ def build_model(K, lam, mu, sigmas):
         return state.set(n1=state["n1"] + 1)
     events["ev_arrival"] = ev_arrival
 
-    # n1-- (service)
-    @tg.event(dist=tg.EXP(lambda s: mu))
-    def ev_mu(self, state):
-        if state["n1"] <= 0:
-            return tg.DISABLED
-        return state.set(n1=state["n1"] - 1)
-    events["ev_mu"] = ev_mu
+    # Service events: one per queue (n_i--) at rate mu
+    for i in range(1, K + 1):
+        name = f"ev_mu_{i}"
+        events[name] = make_service_event(name, f"n{i}", mu)
 
     # Transfer events: n_i--, n_{i+1}++ for i = 1..K-1
     for i in range(1, K):
         name = f"ev_transfer_{i}"
         events[name] = make_transfer_event(name, f"n{i}", f"n{i+1}", sigmas[i - 1])
 
-    # Last decay: n_K-- (rate n_K*sigma_K + mu if n1==0)
+    # Final decay: n_K-- (discarded)
     nk = f"n{K}"
     sig_k = sigmas[K - 1]
 
-    @tg.event(dist=tg.EXP(lambda s, _nk=nk, _sig=sig_k, _mu=mu:
-                          s[_nk] * _sig + (_mu if s["n1"] == 0 and _mu > 0 else 0)))
+    @tg.event(dist=tg.EXP(lambda s, _sig=sig_k: _sig))
     def ev_decay(self, state):
         if state[nk] <= 0:
             return tg.DISABLED
@@ -68,10 +73,10 @@ def build_model(K, lam, mu, sigmas):
     # --- Impulse rewards ---
     rewards = {}
 
-    @tg.impulse_reward(on_event="ev_mu")
-    def count_mu(self, state):
-        return 1.0
-    rewards["count_mu"] = count_mu
+    # Service rewards (one per queue)
+    for i in range(1, K + 1):
+        name = f"count_mu_{i}"
+        rewards[name] = make_reward_func(name, f"ev_mu_{i}")
 
     for i in range(1, K):
         name = f"count_transfer_{i}"
@@ -110,7 +115,7 @@ if __name__ == "__main__":
         "MAX_Q": MAX_Q,
         "States": sol.space.n_states,
         "Transitions": sol.space.n_transitions,
-        "Packet served": round(sol[f"{obj_name}.count_mu"], 6),
+        "Packet served": round(sum(sol[f"{obj_name}.count_mu_{i}"] for i in range(1, K + 1)), 6),
         "Discarded": round(sol[f"{obj_name}.count_decay"], 6),
     }
     for i in range(1, K):
